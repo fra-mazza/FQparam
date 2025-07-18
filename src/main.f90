@@ -1,200 +1,68 @@
-!This is file : optimizer
-! Author = francescomazza
-! Started at: 03.07.2025
-! Last Modified: Fri Jul  4 18:26:29 2025
-!
-Program  optimizer
+!> @brief Main program for the FQ parameter optimizer.
+!> @details This program drives the optimization of Fluctuating Charge (FQ) model parameters.
+!>          It reads the molecular system definition and QM reference data, optionally checks
+!>          the analytical gradients against numerical ones, and then runs the optimization
+!>          to find the best-fit chi and eta parameters.
+program optimizer
+    use types_module
+    use input_module
+    use optimizer_module
+    use debug_module
+    use fq_util
 
-use fq_util
-! use parsing
+    implicit none
 
-Implicit None
+    type(molecule_t):: molecule
+    type(qm_datapoint_t), allocatable:: qm_database(:)
+    type(optimization_settings_t):: opt_settings
+    type(optimization_params_t):: opt_params
+    !> The primary data structure holding all molecule-specific FQ data.
+    type(FQMol_t), dimension(:), allocatable:: FQMolecules
+    real(wp), dimension(:,:), allocatable:: FQJinv
 
-! provvisorio
-real(wp), parameter:: Angstrom = 0.52917721090299996
-integer:: nMol, nAtoms, nAtomTypes, nq, nQMcalc
-integer, dimension(:), allocatable:: atomtypes, nAtomsInMol, MolID
-real(wp), dimension(:), allocatable:: ChiParam, EtaParam, chi, eta, molCharges, V, qint, EintQM, gradients
-real(wp), dimension(:,:), allocatable:: coordinates, qcoords, dqdchi, dqdmu, QMdip, QMQuad, dipint
-character(len = 3), dimension(:), allocatable:: Symbols
-real(wp):: EintFQ,  totalw, wEint, wdip, wquad, Functional, singleQ
-real(wp), dimension(3)::  DipoleOrigin, QuadOrigin, dipFQ, Qcoord
-real(wp), dimension(6):: QuadFQ
+    ! 1. Read all input data from files and hard-coded values.
+    call read_input_data(molecule, qm_database, opt_settings, opt_params)
 
-real(kind = wp), dimension(:), allocatable:: FQs 
-real(kind = wp), dimension(:,:), allocatable:: FQJinv
-type(FQMol), dimension(:), allocatable:: FQMolecules
+    ! 2. Create and initialize the persistent FQ molecules data structure.
+    !    This is allocated once and passed through the program to avoid
+    !    repeated memory allocation/deallocation cycles.
+    call CreateFQMolecules(molecule%nMol, molecule%nAtoms, molecule%nAtomsInMol, &
+                         molecule%MolID, molecule%MolCharges, molecule%coordinates, &
+                         molecule%symbols, FQMolecules)
 
+    ! Calculate and print initial unperturbed charges
+    call UpdateFQParameters(molecule%nAtoms, molecule%atom_types, opt_params, FQMolecules)
+    call MakeFQJ(molecule%nMol, molecule%nAtoms, FQMolecules, FQJinv)
+    call calculate_and_print_unperturbed_charges(molecule%nMol, molecule%nAtoms, FQMolecules, FQJinv)
+    if (allocated(FQJinv)) deallocate(FQJinv)
 
-integer:: i, iostat, it, maxit, iflag, iatom, imol, l
+    ! 3. (Optional) Perform gradient checks for debugging.
+    !    This is highly recommended when changing the cost function or its derivatives.
+    call check_gradients(opt_params, molecule, qm_database, opt_settings)
 
-! Read coordinates, molecules and atom types from input file
-nMol = 1
-nAtoms = 3
-nAtomTypes = 2
-nQMcalc = 1
+    ! 4. Run the main optimization routine.
+    call optimize_parameters(opt_params, molecule, qm_database, opt_settings, FQMolecules)
 
-wEint = 10.0_wp
-wdip = 2.0_wp
-wquad = 1.0_wp 
+    ! 5. Print the final, optimized parameters.
+    print *, 'Final Chi values: ', opt_params%chi
+    print *, 'Final Eta values: ', opt_params%eta
 
-maxit = 20000
-iflag = 1
+    ! Calculate and print final unperturbed charges
+    call UpdateFQParameters(molecule%nAtoms, molecule%atom_types, opt_params, FQMolecules)
+    call MakeFQJ(molecule%nMol, molecule%nAtoms, FQMolecules, FQJinv)
+    call calculate_and_print_unperturbed_charges(molecule%nMol, molecule%nAtoms, FQMolecules, FQJinv)
+    if (allocated(FQJinv)) deallocate(FQJinv)
 
+    ! 6. Clean up memory.
+    call DestroyFQMolecules(FQMolecules)
+    if (allocated(qm_database)) deallocate(qm_database)
+    if (allocated(molecule%atom_types)) deallocate(molecule%atom_types)
+    if (allocated(molecule%symbols)) deallocate(molecule%symbols)
+    if (allocated(molecule%coordinates)) deallocate(molecule%coordinates)
+    if (allocated(molecule%nAtomsInMol)) deallocate(molecule%nAtomsInMol)
+    if (allocated(molecule%MolID)) deallocate(molecule%MolID)
+    if (allocated(molecule%MolCharges)) deallocate(molecule%MolCharges)
+    if (allocated(opt_params%chi)) deallocate(opt_params%chi)
+    if (allocated(opt_params%eta)) deallocate(opt_params%eta)
 
-open(unit = 16, file='FQpar_data.dat' , iostat = iostat, action='read')
-read(16, *) nQMcalc
-read(16, '(a)') 
-
-allocate(atomtypes(nAtomTypes), nAtomsInMol(nMol), MolID(nAtoms), ChiParam(nAtomTypes), EtaPAram(nAtomTypes), chi(nAtoms), &
-  eta(natoms), coordinates(3, nAtoms), symbols(nAtoms), molcharges(nMol), FQs(nAtoms), V(natoms), qint(nQMcalc), & 
-  qcoords(3, nQMcalc), dqdmu(nAtoms, natomtypes), dqdchi(nAtoms, natomtypes), EintQM(nQMcalc), QMdip(3, nQMcalc), &
-  QMquad(6, nQMcalc), gradients(2*nAtomTypes), dipint(3, nQMcalc))
-
-atomtypes = (/ 1, 1, 2 /)
-nAtomsInMol = (/ 3 /)
-MolCharges = (/ 0.0_wp /)
-MolID =(/ 1, 1, 1 /)
-ChiParam = (/ 0.0000001_wp, 0.11_wp/)
-EtaParam = (/ 0.63_wp, 0.58_wp/)
-coordinates(:, 1) = (/    0.75308062_wp,     0.60025412_wp,     0.00000000_wp /)
-coordinates(:, 2) = (/   -0.75308062_wp,     0.60025412_wp,     0.00000000_wp /) 
-coordinates(:, 3) = (/    0.00000000_wp,    -0.00025412_wp,     0.00000000_wp /)
-symbols = (/ 'HW ', 'HW ', 'OW ' /)
-
-
-DipoleOrigin = (/ 0.0_wp, 0.0_wp, 0.0_wp /)
-QuadOrigin = (/ 0.0_wp, 0.0_wp, 0.0_wp /)
-
-
-! Read form file QM data
-do i = 1, nQMcalc
-  read(16, *) qcoords(:,i), qint(i), dipint(:,i), EintQM(i), QMdip(:,i), QMquad(:,i)
-enddo
-
-close(16)
-
-QuadOrigin = (/ 0.0_wp, 0.12652035_wp, 0.0_wp /)
-
-
-! convert coordinates to atomic units
-coordinates = coordinates/Angstrom
-qcoords = qcoords/Angstrom
-
-
-
-! Build chi and eta list
-
-do i = 1, nAtoms
-  chi(i) = ChiParam(atomtypes(i))
-  eta(i) = EtaParam(atomtypes(i))
-enddo
-
-FQs = 0.0_wp
-
-call InitializeMolecules(nMol, nAtoms,  nAtomsInMol, MolID, MolCharges, chi, eta, coordinates, symbols, FQs, FQMolecules)
-
-do i = 1, nmol
-  print*, 'we are looking at ', i
-  print*, 'natomsinmol', fqmolecules(i)%natomsinmol
-  print*, 'symbols', fqmolecules(i)%symbols(:)
-  print*, 'coords', fqmolecules(i)%coords(:,:)
-  print*, 'molid', fqmolecules(i)%molid
-  print*, 'chi', fqmolecules(i)%chi(:)
-  print*, 'eta', fqmolecules(i)%eta(:)
-  print*, 'charge', fqmolecules(i)%molcharge
-end do
-
-call MakeFQJ(nMol, nAtoms, FQMolecules, FQJinv)
-
-call GetPotentialPointCharge(nMol, nAtoms, FQMolecules, V, qint(1), qcoords(:,1))
-
-call UpdateFQs(nMol, nAtoms, FQMolecules, FQJinv, V)
-
-do i = 1, nMol
-  print*, 'We are looking at ', i
-  print*, 'FQs', FQMolecules(i)%FQs(:)
-enddo
-
-EintFQ = intenergy(nMol, nAtoms, FQMolecules, V)
-print*, 'E int: ', EintFQ
-
-call  GetFQsDerivatives(nmol, nAtoms, nAtomtypes,  atomtypes, FQMolecules, FQJinv, V, dqdchi, dqdmu)
-
-! update the Functional and the gradient by summing the contribution from all the charges
-totalw = (wEint+wdip+wquad)
-wEint = wEint/(totalw*nQMcalc)
-wdip = wdip/(totalw*nQMcalc*3)
-wquad = wquad/(totalw*nQMcalc*6)
-
-
-do it = 1, maxit
-  
-  
-  
-
-  Functional = 0.0_wp
-  gradients = 0.0_wp
-  
-  do i = 1, nQMcalc
-    singleQ = qint(i) 
-    Qcoord = Qcoords(:,i)
-    call GetPotentialPointCharge(nMol, nAtoms, FQMolecules, V, SingleQ, Qcoord)
-    call UpdateFQs(nMol, nAtoms, FQMolecules, FQJinv, V)
-    EintFQ = intenergy(nMol, nAtoms, FQMolecules, V)
-    dipFQ = Dipole(nMol, nAtoms, FQMolecules, DipoleOrigin)
-    quadFQ = Quadrupole(nMol, nAtoms, FQMolecules, QuadOrigin)
-  
-    Functional = Functional+wEint*(EintFQ-EintQM(i))**2 
-    Functional = Functional+wdip*norm2(DipFQ-QMDip(:,i))
-    Functional = Functional+wquad*norm2(quadFQ-QMQuad(:,i))
-  
-    call  UpdateGradients(nMol, nAtoms, nAtomTypes, atomtypes,  FQMolecules, V, FQJinv, wEint, EintFQ, EintQM(i), &
-      wdip, dipFQ, QMdip(:,i), wquad, quadFQ, QMquad(:,i), DipoleOrigin, QuadOrigin, gradients)
-  
-  
-  enddo
-  
-  print*, Functional
-  print*, gradients
-
-  call GD(natomtypes, ChiParam, EtaParam, gradients, 1.0D-5, iflag)
-  if (iflag .eq. 0) then
-    print*, 'Convergence reached', it
-    exit
-  endif
-
-  ! update parameters
-  do i = 1, nAtoms
-    chi(i) = ChiParam(atomtypes(i))
-    eta(i) = EtaParam(atomtypes(i))
-  enddo
-  print*, 'chieta', chi, eta
-
-  l = 0
-  do iMol = 1, nMol
-    do iAtom = 1, FQMolecules(iMol)%nAtomsInMol
-      l = l+1
-      FQMolecules(IMol)%chi(iAtom) = chi(l)
-      FQMolecules(IMol)%eta(iAtom) = eta(l)
-    enddo
-  enddo
-
-
-
-
-enddo
-  
-do i = 1, nmol
-  print*, 'we are looking at ', i
-  print*, 'natomsinmol', fqmolecules(i)%natomsinmol
-  print*, 'symbols', fqmolecules(i)%symbols(:)
-  print*, 'coords', fqmolecules(i)%coords(:,:)
-  print*, 'molid', fqmolecules(i)%molid
-  print*, 'chi', fqmolecules(i)%chi(:)
-  print*, 'eta', fqmolecules(i)%eta(:)
-  print*, 'charge', fqmolecules(i)%molcharge
-end do
-
-
-End Program  optimizer 
+end program optimizer
