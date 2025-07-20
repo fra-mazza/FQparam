@@ -13,7 +13,7 @@ contains
         type(optimization_settings_t), intent(in):: opt_settings
         type(FQMol_t), dimension(:), intent(inout):: FQMolecules
 
-        integer:: it, ls_iter, n_params
+        integer:: it, ls_iter, n_params, i
         real(wp):: cost, cost_old
         real(wp), dimension(:), allocatable:: g, g_old, d, p, p_trial
         real(wp):: alpha
@@ -64,10 +64,47 @@ contains
 
             if (sqrt(dot_product(g, g)) < opt_settings%tolerance) then
                 print *, 'Convergence reached after ', it, ' iterations.'
+                ! --- Final Summary ---
+                print *, '--------------------------------------------------'
+                print *, '           Optimization Summary'
+                print *, '--------------------------------------------------'
+                print *, 'Termination Reason: Convergence reached'
+                print *, 'Final Cost Function: ', cost
+                print *, 'Final Gradient Norm: ', sqrt(dot_product(g, g))
+                print *, 'Total Iterations:    ', it
+                print *, 'Final Parameters:'
+                do i = 1, mol_info%nAtomTypes
+                    print '(a, i2, a, a3, a, es12.4e2, a, es12.4e2)', '  Type ', i, ' (', mol_info%type_symbols(i),')', & 
+                        'Chi = ', opt_params%chi(i), ' Eta = ', opt_params%eta(i)
+                enddo
+                print *, 'Final Gradient Vector:'
+                do i = 1, n_params
+                    print '(a, i2, a, es12.4e2)', '  g(', i, ') = ', g(i)
+                enddo
+                print *, '--------------------------------------------------'
                 return
             endif
         enddo
         print *, 'Maximum iterations reached.'
+
+        ! --- Final Summary ---
+        print *, '--------------------------------------------------'
+        print *, '           Optimization Summary'
+        print *, '--------------------------------------------------'
+        print *, 'Termination Reason: Maximum iterations reached'
+        print *, 'Final Cost Function: ', cost
+        print *, 'Final Gradient Norm: ', sqrt(dot_product(g, g))
+        print *, 'Total Iterations:    ', it
+        print *, 'Final Parameters:'
+        do i = 1, molecule%nAtomTypes
+            print '(a, i2, a, a3, a, es12.4e2, a, es12.4e2)', '  Type ', i, ' (', molecule%type_symbols(i),')', & 
+                'Chi = ', opt_params%chi(i), ' Eta = ', opt_params%eta(i)
+        enddo
+        print *, 'Final Gradient Vector:'
+        do i = 1, n_params
+            print '(a, i2, a, es12.4e2)', '  g(', i, ') = ', g(i)
+        enddo
+        print *, '--------------------------------------------------'
     end subroutine optimize_parameters
 
 end module optimizer_module

@@ -26,6 +26,7 @@ module types_module
   type :: molecule_t
       integer :: nAtoms, nAtomTypes
       integer, dimension(:), allocatable :: atom_types ! map each atom to an atom type index
+      character(len=3), dimension(:), allocatable :: type_symbols !< Symbol for each atom type
       character(len=3), dimension(:), allocatable :: symbols
       real(wp), dimension(:,:), allocatable :: coordinates
       integer :: nMol

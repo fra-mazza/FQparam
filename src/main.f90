@@ -41,7 +41,7 @@ program optimizer
     call check_gradients(opt_params, molecule, qm_database, opt_settings)
 
     ! 4. Run the main optimization routine.
-    call optimize_parameters(opt_params, molecule, qm_database, opt_settings, FQMolecules)
+    call optimize_parameters(opt_params, molecule, qm_database, opt_settings, FQMolecules, molecule)
 
     ! 5. Print the final, optimized parameters.
     print *, 'Final Chi values: ', opt_params%chi
@@ -58,6 +58,7 @@ program optimizer
     if (allocated(qm_database)) deallocate(qm_database)
     if (allocated(molecule%atom_types)) deallocate(molecule%atom_types)
     if (allocated(molecule%symbols)) deallocate(molecule%symbols)
+    if (allocated(molecule%type_symbols)) deallocate(molecule%type_symbols)
     if (allocated(molecule%coordinates)) deallocate(molecule%coordinates)
     if (allocated(molecule%nAtomsInMol)) deallocate(molecule%nAtomsInMol)
     if (allocated(molecule%MolID)) deallocate(molecule%MolID)

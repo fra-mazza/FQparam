@@ -59,6 +59,7 @@ contains
                  opt_params%eta(molecule%nAtomTypes), &
                  molecule%coordinates(3, molecule%nAtoms), &
                  molecule%symbols(molecule%nAtoms), &
+                 molecule%type_symbols(molecule%nAtomTypes), &
                  molecule%MolCharges(molecule%nMol), &
                  qm_database(nQMcalc))
 
@@ -73,6 +74,7 @@ contains
         molecule%coordinates(:, 2) = (/   -0.75308062_wp,     0.60025412_wp,     0.00000000_wp /)
         molecule%coordinates(:, 3) = (/    0.00000000_wp,    -0.00025412_wp,     0.00000000_wp /)
         molecule%symbols = (/ 'HW ', 'HW ', 'OW ' /)
+        molecule%type_symbols = (/ 'HW ', 'OW ' /)
 
         opt_settings%dipole_origin = (/ 0.0_wp, 0.0_wp, 0.0_wp /)
         opt_settings%quad_origin = (/ 0.0_wp, 0.12652035_wp, 0.0_wp /)  ! Center of mass
